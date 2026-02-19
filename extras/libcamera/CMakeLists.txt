@@ -26,6 +26,7 @@ target_link_libraries(mandeye_libcamera
     ${LIBCAMERA_LIBRARIES}
     ${OpenCV_LIBS}
     ${GPIOD_LIBRARIES}      # <-- added
+    atomic                  # <-- needed on 32-bit ARM for std::atomic<uint64_t>
 )
 
 install(TARGETS mandeye_libcamera RUNTIME DESTINATION /opt/mandeye/extras/)
