@@ -139,7 +139,7 @@ constexpr GPIO::GPIO_PULL GetPULL([[maybe_unused]] BUTTON btn)
 // TX on GPIO 0 (RPi4 header pin 27) -> connected to LiDAR TIMESYNC/UART RX
 [[maybe_unused]] inline const std::array<const std::string, 1> GetLidarSyncPorts()
 {
-    return {"/dev/ttyAMA1"};
+    return {"/dev/ttyAMA2"};
 }
 
 // GNSS receiver on /dev/ttyAMA0 (requires dtoverlay=disable-bt in config.txt)
