@@ -218,8 +218,8 @@ There are optional services that can be started:
 
 PPS time synchronization generator using GPIO:
 ```shell
-sudo systemctl enable mandeye_fakepps.service
-mandeye_fakepps_start # PPS generator using GPIO
+sudo systemctl enable mandeye_fake_pps.service
+mandeye_fake_pps_start # PPS generator using GPIO
 ```
 
 PTP time synchronization generator using eth0 (works only on Raspberry Pi 5):
