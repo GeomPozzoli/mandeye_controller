@@ -3,7 +3,7 @@ Description=Mandeye_libcamera
 After=multi-user.target
 
 [Service]
-User=pi
+User=paso
 StandardOutput=journal
 StandardError=journal
 ExecStartPre=/bin/sleep 20
