@@ -99,9 +99,12 @@ namespace mandeye
         std::thread m_captureThread;
 
         // -- trigger state --------------------------------------------------
-        TriggerMode m_triggerMode    {TriggerMode::INTERNAL};
-        int         m_triggerGpioPin {-1};
-        std::string m_gpioChipPath   {"/dev/gpiochip0"};
+        TriggerMode m_triggerMode       {TriggerMode::INTERNAL};
+        int         m_triggerGpioPin   {-1};
+        std::string m_gpioChipPath      {"/dev/gpiochip0"};
+        // true  = detect falling edge (TRIGGER_LOW signal, e.g. IMX296 XTR)
+        // false = detect rising  edge (PPS_HIGH signal, e.g. LiDAR PPS fork) [default]
+        bool        m_triggerEdgeFalling {false};
 
         // UTC nanoseconds of the most recent PPS edge.
         // Written by ppsWatchThread, read by requestComplete -> atomic.

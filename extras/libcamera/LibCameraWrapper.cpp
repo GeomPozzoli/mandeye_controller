@@ -231,12 +231,16 @@ bool LibCameraWrapper::start(int camNo, nlohmann::json config, StreamRole role)
         if (tc.contains("gpioChip"))      m_gpioChipPath   = tc["gpioChip"].get<std::string>();
         if (tc.contains("maxFrameAgeMs"))
             m_maxFrameAgeNs = uint64_t(tc["maxFrameAgeMs"].get<uint32_t>()) * 1'000'000ULL;
+        // edge: "falling" for TRIGGER_LOW signals (IMX296 XTR), "rising" for PPS_HIGH [default]
+        const std::string edge = tc.value("edge", "rising");
+        m_triggerEdgeFalling = (edge == "falling");
     }
 
     const char* modeNames[] = {"INTERNAL", "NEAREST_FRAME", "XVS_HARD"};
     std::cout << "[Camera] TriggerMode=" << modeNames[int(m_triggerMode)];
     if (m_triggerMode != TriggerMode::INTERNAL)
         std::cout << " GPIO=" << m_triggerGpioPin
+                  << " edge=" << (m_triggerEdgeFalling ? "falling" : "rising")
                   << " maxFrameAge=" << m_maxFrameAgeNs/1'000'000 << "ms";
     std::cout << "\n";
 
@@ -337,13 +341,29 @@ bool LibCameraWrapper::start(int camNo, nlohmann::json config, StreamRole role)
                     std::cerr << "[PPS] Cannot get GPIO line " << m_triggerGpioPin
                               << ". Falling back to INTERNAL.\n";
                     releasePpsGpio();
-                } else if (gpiod_line_request_rising_edge_events(
-                               m_ppsLine, "mandeye_cam_pps") < 0) {
-                    std::cerr << "[PPS] Cannot request rising-edge events: "
+                } else {
+                    // Choose edge direction from config:
+                    //   "rising"  (default) for PPS_HIGH signals (IMX219, fork of LiDAR PPS)
+                    //   "falling"           for TRIGGER_LOW signals (IMX296 XTR Trig+)
+                    int edgeRet;
+                    if (m_triggerEdgeFalling) {
+                        edgeRet = gpiod_line_request_falling_edge_events(
+                                      m_ppsLine, "mandeye_cam_pps");
+                        std::cout << "[PPS] Listening for FALLING edge on GPIO "
+                                  << m_triggerGpioPin << "\n";
+                    } else {
+                        edgeRet = gpiod_line_request_rising_edge_events(
+                                      m_ppsLine, "mandeye_cam_pps");
+                        std::cout << "[PPS] Listening for RISING edge on GPIO "
+                                  << m_triggerGpioPin << "\n";
+                    }
+                    if (edgeRet < 0) {
+                    std::cerr << "[PPS] Cannot request edge events: "
                               << strerror(errno) << ". Falling back to INTERNAL.\n";
                     releasePpsGpio();
-                } else {
-                    gpioOk = true;
+                    } else {
+                        gpioOk = true;
+                    }
                 }
             }
         }
