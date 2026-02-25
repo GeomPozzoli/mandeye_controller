@@ -177,6 +177,13 @@ void LibCameraWrapper::ppsWatchThread()
 
     constexpr timespec timeout{0, 50'000'000}; // 50 ms — lets us check m_running
 
+    // Debounce: after accepting an edge, ignore further edges for this many ns.
+    // For TRIGGER_LOW at 10Hz (period=100ms), 50ms blocks the spurious rising
+    // edge that arrives 10ms after the falling edge (end of pulse).
+    // For PPS_HIGH at 1Hz (period=1000ms), 50ms is negligible.
+    const uint64_t debounceNs = 50'000'000ULL; // 50 ms
+    uint64_t lastAcceptedMonoNs = 0;
+
     while (m_running.load())
     {
         int ret = gpiod_line_event_wait(m_ppsLine, &timeout);
@@ -189,12 +196,25 @@ void LibCameraWrapper::ppsWatchThread()
 
         gpiod_line_event ev;
         if (gpiod_line_event_read(m_ppsLine, &ev) < 0) continue;
-        if (ev.event_type != GPIOD_LINE_EVENT_RISING_EDGE) continue;
 
-        // Kernel event timestamp is CLOCK_MONOTONIC; convert to UTC
-        AdjustSystemClock();
+        // Accept the configured edge type only
+        const int wantedEdge = m_triggerEdgeFalling
+                               ? GPIOD_LINE_EVENT_FALLING_EDGE
+                               : GPIOD_LINE_EVENT_RISING_EDGE;
+        if (ev.event_type != wantedEdge) continue;
+
+        // Debounce: ignore edges that arrive too soon after the last accepted one
         const uint64_t evMonoNs = uint64_t(ev.ts.tv_sec)*1'000'000'000ULL + ev.ts.tv_nsec;
-        const uint64_t evUtcNs  = evMonoNs + m_monoOffset;
+        if (lastAcceptedMonoNs > 0 && evMonoNs - lastAcceptedMonoNs < debounceNs) {
+            std::cout << "[PPS] edge ignored (debounce), dt="
+                      << (evMonoNs - lastAcceptedMonoNs) / 1'000'000 << " ms\n";
+            continue;
+        }
+        lastAcceptedMonoNs = evMonoNs;
+
+        // Convert CLOCK_MONOTONIC to UTC
+        AdjustSystemClock();
+        const uint64_t evUtcNs = evMonoNs + m_monoOffset;
 
         m_lastPpsNs.store(evUtcNs, std::memory_order_release);
         m_ppsPending.store(true,   std::memory_order_release);
