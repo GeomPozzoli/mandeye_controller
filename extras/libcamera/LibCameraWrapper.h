@@ -34,17 +34,31 @@ namespace mandeye
      * NEAREST_FRAME  (any Pi-Camera model)
      *   Camera still runs free at the rate set by FrameDurationLimits.
      *   A dedicated thread (ppsWatchThread) blocks on a GPIO pin waiting for
-     *   rising edges from the PPS signal. On each edge it stores the UTC
-     *   nanosecond timestamp and sets m_ppsPending = true.
+     *   rising or falling edges from the trigger signal. On each edge it stores
+     *   the UTC nanosecond timestamp and sets m_ppsPending = true.
      *   requestComplete() checks every incoming frame:
      *     - Convert the sensor hardware timestamp (CLOCK_MONOTONIC) to UTC.
      *     - If m_ppsPending is set AND |frame_utc - pps_utc| < maxFrameAgeNs:
      *         accept the frame, tag it with the PPS timestamp, clear m_ppsPending.
      *     - Otherwise: silently drop the frame (re-queue it for the next PPS).
-     *   Net effect: one photo per PPS pulse, timestamped at the exact second
-     *   boundary, aligned with the LiDAR data.
+     *   Net effect: one photo per PPS pulse, timestamped at the trigger edge.
      *   Precision: +/-(frame_period / 2). At 10 fps -> +/-50 ms. At 30 fps -> +/-17 ms.
-     *   Wiring: one GPIO pin wired to the same PPS line as the LiDAR (simple fork).
+     *   Wiring: one GPIO pin wired to the same PPS/trigger line (simple fork).
+     *   Config: "edge": "rising" (default, IMX219) or "falling" (IMX296 TRIGGER_LOW).
+     *
+     * HARDWARE_TRIGGER  (IMX296 Global Shutter with XTR hardware trigger)
+     *   The sensor only produces a frame when it receives a hardware pulse on
+     *   XTR (Trig+). Since every frame is guaranteed to correspond to exactly
+     *   one trigger event, no frame selection is needed.
+     *   ppsWatchThread records the trigger UTC timestamp (falling edge on GPIO).
+     *   requestComplete() accepts EVERY frame and tags it with the last recorded
+     *   trigger timestamp. This is simpler and more correct than NEAREST_FRAME
+     *   for hardware-triggered sensors.
+     *   Precision: determined by hardware trigger timing (fake_pps channel thread).
+     *   Wiring: RPi GPIO 23 (pin 16) -> XTR (Trig+) IMX296
+     *           RPi GPIO 22 (pin 15) -> fork of GPIO 23 (ppsWatchThread input)
+     *           RPi GND             -> GND (Trig-) IMX296
+     *   Config: "edge": "falling" (required for TRIGGER_LOW signal).
      *
      * XVS_HARD  (IMX477 HQ Camera or IMX296 Global Shutter only)
      *   The sensor is put into slave mode via the libcamera FrameSync draft
@@ -60,6 +74,7 @@ namespace mandeye
     enum class TriggerMode {
         INTERNAL,
         NEAREST_FRAME,
+        HARDWARE_TRIGGER,   // IMX296 XTR hardware trigger: accept all frames, tag with last trigger ts
         XVS_HARD,
     };
 
