@@ -152,6 +152,10 @@ void saveDefaultConfig(const std::vector<ChannelConfig>& channels) {
         jex["_comment"]  =
             "IMX296 1Hz - RPi pin 16 (GPIO23) -> XTR (Trig+). "
             "Exposure=10ms+14.26us. Move to channels[] and remove _disabled to activate.";
+        jex["_note_cam0_config"] =
+            "In cam0_config.json set: trigger.mode=HARDWARE_TRIGGER, trigger.edge=falling, "
+            "picamera.ExposureTime=10000 (pulseMs*1000). "
+            "If you change pulseMs here, update ExposureTime accordingly.";
         j["channels_examples"].push_back(jex);
     }
     // Example: IMX296 at 10Hz
@@ -166,6 +170,10 @@ void saveDefaultConfig(const std::vector<ChannelConfig>& channels) {
             "IMX296 10Hz - RPi pin 16 (GPIO23) -> XTR (Trig+). "
             "10 triggers/s, first aligned to PPS. Exposure=10ms+14.26us. "
             "Move to channels[] and remove _disabled to activate.";
+        jex["_note_cam0_config"] =
+            "In cam0_config.json set: trigger.mode=HARDWARE_TRIGGER, trigger.edge=falling, "
+            "picamera.ExposureTime=10000 (pulseMs*1000). "
+            "If you change pulseMs here, update ExposureTime accordingly.";
         j["channels_examples"].push_back(jex);
     }
 
