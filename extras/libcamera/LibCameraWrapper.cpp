@@ -158,17 +158,19 @@ void LibCameraWrapper::AdjustSystemClock() {
 
 // -- ppsWatchThread -----------------------------------------------------------
 //
-// Blocks on rising-edge events from the PPS GPIO pin.
+// Blocks on GPIO edge events (rising or falling, configured via m_triggerEdgeFalling).
 //
 // The gpiod event structure carries a kernel timestamp (CLOCK_MONOTONIC),
 // which we convert to UTC using the same m_monoOffset used for sensor
-// timestamps. This keeps PPS timestamps and frame timestamps in the same
+// timestamps. This keeps trigger timestamps and frame timestamps in the same
 // reference frame without any additional offset.
 //
-// For NEAREST_FRAME: sets m_ppsPending = true so requestComplete() knows
-//   to look for the next matching frame.
-// For XVS_HARD: the sensor drives itself; we just record the timestamp
-//   for metadata so post-processing can verify alignment.
+// For NEAREST_FRAME:    sets m_ppsPending = true so requestComplete() knows
+//                       to look for the next matching frame.
+// For HARDWARE_TRIGGER: records the trigger UTC timestamp; requestComplete()
+//                       accepts every frame and tags it with this timestamp.
+// For XVS_HARD:         the sensor drives itself; we just record the timestamp
+//                       for metadata so post-processing can verify alignment.
 //
 void LibCameraWrapper::ppsWatchThread()
 {
@@ -245,8 +247,9 @@ bool LibCameraWrapper::start(int camNo, nlohmann::json config, StreamRole role)
     if (config.contains("trigger")) {
         const auto &tc = config["trigger"];
         const std::string mode = tc.value("mode", "INTERNAL");
-        if      (mode == "NEAREST_FRAME") m_triggerMode = TriggerMode::NEAREST_FRAME;
-        else if (mode == "XVS_HARD")      m_triggerMode = TriggerMode::XVS_HARD;
+        if      (mode == "NEAREST_FRAME")    m_triggerMode = TriggerMode::NEAREST_FRAME;
+        else if (mode == "HARDWARE_TRIGGER") m_triggerMode = TriggerMode::HARDWARE_TRIGGER;
+        else if (mode == "XVS_HARD")         m_triggerMode = TriggerMode::XVS_HARD;
         if (tc.contains("gpioPin"))       m_triggerGpioPin = tc["gpioPin"].get<int>();
         if (tc.contains("gpioChip"))      m_gpioChipPath   = tc["gpioChip"].get<std::string>();
         if (tc.contains("maxFrameAgeMs"))
@@ -256,7 +259,7 @@ bool LibCameraWrapper::start(int camNo, nlohmann::json config, StreamRole role)
         m_triggerEdgeFalling = (edge == "falling");
     }
 
-    const char* modeNames[] = {"INTERNAL", "NEAREST_FRAME", "XVS_HARD"};
+    const char* modeNames[] = {"INTERNAL", "NEAREST_FRAME", "HARDWARE_TRIGGER", "XVS_HARD"};
     std::cout << "[Camera] TriggerMode=" << modeNames[int(m_triggerMode)];
     if (m_triggerMode != TriggerMode::INTERNAL)
         std::cout << " GPIO=" << m_triggerGpioPin
@@ -345,7 +348,7 @@ bool LibCameraWrapper::start(int camNo, nlohmann::json config, StreamRole role)
                      "Ensure XVS wire is connected.\n";
     }
 
-    // Init GPIO PPS watch for NEAREST_FRAME and XVS_HARD
+    // Init GPIO PPS watch for NEAREST_FRAME, HARDWARE_TRIGGER and XVS_HARD
     if (m_triggerMode != TriggerMode::INTERNAL) {
         bool gpioOk = false;
         if (m_triggerGpioPin < 0) {
@@ -501,6 +504,20 @@ void LibCameraWrapper::requestComplete(Request *request)
         }
         break;
     }
+
+    case TriggerMode::HARDWARE_TRIGGER:
+        // The IMX296 sensor only produces a frame when it receives a hardware
+        // trigger pulse on XTR (Trig+). Every frame that arrives here is
+        // guaranteed to correspond to exactly one trigger event — no selection
+        // needed. We tag it with the UTC timestamp of the last trigger edge
+        // recorded by ppsWatchThread (falling edge on the GPIO fork).
+        keepFrame         = true;
+        reportTimestampNs = m_lastPpsNs.load(std::memory_order_acquire);
+        std::cout << "[Camera] HARDWARE_TRIGGER accepted, trigger_utc="
+                  << reportTimestampNs << " frame_utc=" << frameUtcNs
+                  << " delta=" << (int64_t(frameUtcNs) - int64_t(reportTimestampNs)) / 1000
+                  << " us\n";
+        break;
 
     case TriggerMode::XVS_HARD:
         // Sensor only produces a frame when it receives XVS, so every frame is valid.
