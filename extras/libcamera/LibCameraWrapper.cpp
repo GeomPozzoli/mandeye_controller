@@ -507,16 +507,20 @@ void LibCameraWrapper::requestComplete(Request *request)
 
     case TriggerMode::HARDWARE_TRIGGER:
         // The IMX296 sensor only produces a frame when it receives a hardware
-        // trigger pulse on XTR (Trig+). Every frame that arrives here is
-        // guaranteed to correspond to exactly one trigger event — no selection
-        // needed. We tag it with the UTC timestamp of the last trigger edge
-        // recorded by ppsWatchThread (falling edge on the GPIO fork).
-        keepFrame         = true;
-        reportTimestampNs = m_lastPpsNs.load(std::memory_order_acquire);
-        std::cout << "[Camera] HARDWARE_TRIGGER accepted, trigger_utc="
-                  << reportTimestampNs << " frame_utc=" << frameUtcNs
-                  << " delta=" << (int64_t(frameUtcNs) - int64_t(reportTimestampNs)) / 1000
-                  << " us\n";
+        // trigger pulse on XTR (Trig+). We accept only the FIRST frame after
+        // each trigger edge (m_ppsPending is set by ppsWatchThread on each edge
+        // and cleared here after the first accepted frame).
+        // This discards any extra frames that libcamera delivers from buffered
+        // requests before the next trigger edge arrives.
+        if (m_ppsPending.load(std::memory_order_acquire)) {
+            reportTimestampNs = m_lastPpsNs.load(std::memory_order_acquire);
+            keepFrame         = true;
+            m_ppsPending.store(false, std::memory_order_release);
+            std::cout << "[Camera] HARDWARE_TRIGGER accepted, trigger_utc="
+                      << reportTimestampNs << " frame_utc=" << frameUtcNs
+                      << " delta=" << (int64_t(frameUtcNs) - int64_t(reportTimestampNs)) / 1000
+                      << " us\n";
+        }
         break;
 
     case TriggerMode::XVS_HARD:
