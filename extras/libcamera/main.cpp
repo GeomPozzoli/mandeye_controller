@@ -309,21 +309,27 @@ int main(int argc, char** argv)
                 std::filesystem::create_directories(directory);
 
                 // delegate frame saving to std::future (separate thread).
-                jpgSaveThread = std::async(std::launch::async, [=]() {
+                // Capture local copies of the frame data before launching the async thread.
+                // This prevents a race condition where global::photoMetadata or global::lastPhoto
+                // could be overwritten by the next frame before the save thread completes.
+                // The timestamp and directory are already captured by value via [=].
+                cv::Mat imgSnapshot;
+                nlohmann::json metaSnapshot;
+                {
+                    std::lock_guard<std::mutex> lck(global::photoMutex);
+                    imgSnapshot  = global::lastPhoto.clone();
+                    metaSnapshot = global::photoMetadata;
+                }
+
+                jpgSaveThread = std::async(std::launch::async, [=, imgSnapshot=std::move(imgSnapshot), metaSnapshot=std::move(metaSnapshot)]() {
                     try {
                         const auto start = std::chrono::high_resolution_clock::now();
                         const auto filename = directory.string() + "/" + global::prefix + std::to_string(timestamp);
                         const auto filenameJpg = filename+ ".jpg";
                         const auto filenameMeta = filename + ".meta.json";
-                        // copy last photo
-                        cv::Mat imgToSave;
-                        {
-                            std::lock_guard<std::mutex> lck(global::photoMutex);
-                            imgToSave = global::lastPhoto.clone();
-                        }
                         // create buffer in memory and write it
                         std::vector<uchar> buf;
-                        cv::imencode(".jpg", imgToSave, buf);
+                        cv::imencode(".jpg", imgSnapshot, buf);
                         std::ofstream file(filenameJpg, std::ios::binary);
                         file.write(reinterpret_cast<char *>(buf.data()), buf.size());
                         file.close();
@@ -332,9 +338,9 @@ int main(int argc, char** argv)
                         std::cout << "Wrote " << filenameJpg << " size :" << float(buf.size()) / (1024 * 1024) << " MB in " <<
                                 duration.count() << "ms" << std::endl;
 
-                        // save metadata
+                        // save metadata (using local snapshot, not global - avoids race condition)
                         std::ofstream metadataFile(filenameMeta);
-                        metadataFile << global::photoMetadata.dump(4);
+                        metadataFile << metaSnapshot.dump(4);
                         metadataFile.close();
                         std::cout << "Wrote " << filenameMeta << std::endl;
                     } catch (const std::exception &e) {
